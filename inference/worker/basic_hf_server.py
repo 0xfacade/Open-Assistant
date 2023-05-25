@@ -86,7 +86,11 @@ def model_thread():
                 ids = ids.to(model.device)
                 stopping_criteria = (
                     transformers.StoppingCriteriaList(
-                        [hf_stopping.SequenceStoppingCriteria(tokenizer, stop_sequences, prompt)]
+                        [
+                            hf_stopping.SequenceStoppingCriteria(tokenizer, stop_sequences, prompt)
+                            # TODO: add a stopping criterion that checks whether a request for stopping the inference was received
+                            # as indicated by closing the event stream.
+                        ]
                     )
                     if stop_sequences
                     else None
@@ -201,7 +205,10 @@ async def generate(
                 if output.is_error:
                     raise Exception(output.error)
         except Exception as e:
+            # TODO: catch asyncio.CancelledError separately; it indicates that the client is no longer interested in receiving the response.
+            # Set a flag that is read by the stopping crtierion to indicate that the model should stop generating. 
             logger.exception("Exception in event stream")
+            # TODO: why do we put an event on the queue if it won't be sent anymore?
             output_queue.put_nowait(interface.GenerateStreamResponse(error=str(e)))
             raise
 
