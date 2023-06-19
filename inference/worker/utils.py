@@ -157,7 +157,7 @@ def wait_for_inference_server(http: "HttpClient", timeout: int = 600):
 
 
 def text_to_events(
-    text: str, seed: int | None = None, pause: float = 0.0
+    text: str, seed: int | None = None, pause: float = 0.0, interrupted: threading.Event | None = None
 ) -> Iterable[interface.GenerateStreamResponse]:
     """
     Iterate over stream generation "events" derived from the given text, where each word in the text is treated as a
@@ -172,8 +172,14 @@ def text_to_events(
                 id=0,
             ),
         )
+
         if pause > 0:
             time.sleep(pause)
+
+        if interrupted is not None and interrupted.is_set():
+            # TODO: should we still generate an end signal?
+            return
+
     yield interface.GenerateStreamResponse(
         token=interface.Token(
             text=tokens[-1],
@@ -189,7 +195,7 @@ def text_to_events(
     )
 
 
-def lorem_events(seed):
+def lorem_events(seed, interrupted: threading.Event):
     sentence = lorem.paragraph()
     yield from text_to_events(sentence, seed=seed, pause=0.2)
 
@@ -239,6 +245,7 @@ class HttpClient(pydantic.BaseModel):
 
 def get_inference_server_stream_events(
     request: interface.GenerateStreamRequest,
+    interrupt_event: threading.Event
 ) -> Iterable[interface.GenerateStreamResponse]:
     """Query the model inference server specified in the worker settings and stream the generation events."""
     http = HttpClient(
@@ -270,3 +277,7 @@ def get_inference_server_stream_events(
             continue
         stream_response = interface.GenerateStreamResponse.parse_raw(event.data)
         yield stream_response
+
+        if interrupt_event.is_set():
+            client.resp.close()
+            break

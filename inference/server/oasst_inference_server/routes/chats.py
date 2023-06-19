@@ -197,6 +197,7 @@ async def message_events(
     async def event_generator(chat_id: str, message_id: str, worker_compat_hash: str | None):
         redis_client = deps.make_redis_client()
         message_queue = queueing.message_queue(redis_client, message_id=message_id)
+        stop_generating_queue = queueing.stop_generating_queue(redis_client, message_id)
         work_queue = (
             queueing.work_queue(redis_client, worker_compat_hash=worker_compat_hash)
             if worker_compat_hash is not None
@@ -278,6 +279,9 @@ async def message_events(
                 logger.warning(f"Client disconnected while streaming {chat_id}")
 
             logger.info(f"Finished streaming {chat_id}")
+        except asyncio.CancelledError:
+            logger.info(f'Client closed connection to stream of {message_id}')
+            stop_generating_queue.enqueue("STOP")
         except Exception:
             logger.exception(f"Error streaming {chat_id}")
             raise

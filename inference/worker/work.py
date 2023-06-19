@@ -1,5 +1,7 @@
 import re
 from concurrent import futures
+import threading
+from functools import lru_cache
 
 import chat_chain
 import interface
@@ -87,11 +89,16 @@ def parse_safety_response(safety_opinion: str) -> tuple[str, str]:
     return label, rots
 
 
+@lru_cache(maxsize=1024)  # TODO: what's a proper size?
+def get_stop_requested_event(prompt_id: int) -> threading.Event:
+    return threading.Event()
+
+
 def handle_work_request(
     ws: websocket.WebSocket,
     tokenizer: transformers.PreTrainedTokenizer,
     work_request: inference.WorkRequest,
-    worker_config: inference.WorkerConfig,
+    worker_config: inference.WorkerConfig
 ):
     """Handle a work request from end-to-end. Handles plugins and safety if enabled."""
     parameters = interface.GenerateStreamParameters.from_work_parameters(work_request.parameters)
@@ -137,15 +144,18 @@ def handle_work_request(
 
     stream_response = None
     token_buffer = utils.TokenBuffer(stop_sequences=parameters.stop)
+    message_id = work_request.thread.messages[-1].id
+    interrupt_event = get_stop_requested_event(message_id)
+
     if model_config.is_lorem:
-        stream_events = utils.lorem_events(parameters.seed)
+        stream_events = utils.lorem_events(parameters.seed, interrupt_event)
     else:
         prompt = utils.truncate_prompt(tokenizer, worker_config, parameters, prompt, used_plugin is not None)
         stream_request = interface.GenerateStreamRequest(
             inputs=prompt,
             parameters=parameters,
         )
-        stream_events = utils.get_inference_server_stream_events(stream_request)
+        stream_events = utils.get_inference_server_stream_events(stream_request, interrupt_event)
 
     generated_ids = []
     decoded_text = ""
