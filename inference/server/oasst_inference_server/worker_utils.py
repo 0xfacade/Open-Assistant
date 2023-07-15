@@ -53,7 +53,7 @@ def get_protocol_version(protocol_version: str = protocol_version_header) -> str
 async def get_worker_id(
     api_key: str = Depends(get_api_key),
     protocol_version: str = Depends(get_protocol_version),
-) -> models.DbWorker:
+) -> str:
     """Get the ID of a worker from its API key and protocol version."""
     logger.info(f"get_worker: {api_key=}, {protocol_version=}")
     query = sqlmodel.select(models.DbWorker).where(models.DbWorker.api_key == api_key)
@@ -92,7 +92,8 @@ async def receive_worker_response(
 async def receive_worker_info(
     websocket: fastapi.WebSocket,
 ) -> inference.WorkerInfo:
-    return inference.WorkerInfo.parse_raw(await websocket.receive_text())
+    text = await websocket.receive_text()
+    return inference.WorkerInfo.parse_raw(text)
 
 
 async def store_worker_session(worker_session: WorkerSession):
