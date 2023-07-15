@@ -19,6 +19,8 @@ RUN /opt/miniconda/envs/worker/bin/pip install /tmp/oasst-shared
 COPY ./${APP_RELATIVE_PATH}/requirements.txt .
 RUN /opt/miniconda/envs/worker/bin/pip install -r requirements.txt
 
+RUN pip install debugpy -t /tmp
+
 COPY ./${APP_RELATIVE_PATH}/*.py .
 COPY ./${APP_RELATIVE_PATH}/worker_full_main.sh /entrypoint.sh
 

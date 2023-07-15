@@ -345,7 +345,10 @@ async def handle_worker(
     protocol_version: str = worker_utils.protocol_version_header,
 ):
     await websocket.accept()
-    context = await HandleWorkerContext.build(websocket, api_key, protocol_version)
+    try:
+        context = await HandleWorkerContext.build(websocket, api_key, protocol_version)
+    except RuntimeError as e:
+        print(e)
     futures = FuturesManager(context)
     session = SessionManager(context)
 

@@ -30,8 +30,8 @@ if [ -z "$CUDA_VISIBLE_DEVICES" ]; then
     echo "Starting worker server on port $worker_port"
     text-generation-launcher --model-id $MODEL_ID --num-shard $num_shards $quantize_args --port $worker_port &
     export INFERENCE_SERVER_URL="http://localhost:$worker_port"
-    echo "Starting worker"
-    /opt/miniconda/envs/worker/bin/python /worker &
+    echo "Starting worker (waiting for debugger)"
+    /opt/miniconda/envs/worker/bin/python /tmp/debugpy --wait-for-client --listen 0.0.0.0:5679 /worker &
 
 else
     # split cuda devices and loop over them
