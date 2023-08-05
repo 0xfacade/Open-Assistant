@@ -289,6 +289,9 @@ async def message_events(
 
             logger.info(f"Finished streaming {chat_id}")
         except Exception:
+            # TODO: catch asyncio.CancelledError separately; it indicates that the user is no longer interested in receiving the response
+            # Make sure to close the stream from the worker server so that the generation is also stopped.
+            # Possibly set the status of the message in the database to cancelled.
             logger.exception(f"Error streaming {chat_id}")
             raise
         finally:
