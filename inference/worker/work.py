@@ -19,6 +19,7 @@ from loguru import logger
 from oasst_shared.schemas import inference
 from settings import settings
 from utils import shared_tokenizer_lock, special_tokens
+import threading
 
 
 def make_prompt_and_parameters(
@@ -100,6 +101,7 @@ def handle_work_request(
     tokenizer: transformers.PreTrainedTokenizer,
     work_request: inference.WorkRequest,
     worker_config: inference.WorkerConfig,
+    stop_event: threading.Event
 ):
     """Handle a work request from end-to-end. Handles plugins and safety if enabled."""
     parameters = interface.GenerateStreamParameters.from_work_parameters(work_request.parameters)
@@ -153,7 +155,7 @@ def handle_work_request(
             inputs=prompt,
             parameters=parameters,
         )
-        stream_events = utils.get_inference_server_stream_events(stream_request)
+        stream_events = utils.get_inference_server_stream_events(stream_request, stop_event)
 
     generated_ids = []
     decoded_text = ""

@@ -88,7 +88,6 @@ def get_work_request_container(work_request_map: WorkRequestContainerMap, reques
 
 class FutureType(str, Enum):
     WORK_REQUEST = "WORK_REQUEST"
-    STOP_REQUEST = "STOP_REQUEST"
     WORKER_RESPONSE = "WORKER_RESPONSE"
 
 
@@ -133,8 +132,10 @@ async def handle_worker(
     worker_config = worker_info.config
     worker_compat_hash = worker_config.compat_hash
     work_queue = queueing.work_queue(deps.redis_client, worker_compat_hash)
-    redis_client = deps.make_redis_client()
-    blocking_work_queue = queueing.work_queue(redis_client, worker_compat_hash)
+
+    # The blocking variants need their own connections ("clients") because they block the entire connection
+    blocking_work_queue = queueing.work_queue(deps.make_redis_client(), worker_compat_hash)
+    
     worker_session = worker_utils.WorkerSession(
         worker_id=worker_id,
         worker_info=worker_info,
@@ -195,11 +196,17 @@ async def handle_worker(
                         await handle_timeout(message=e.message)
                     finally:
                         _add_work_dequeue(pending_futures)
-                elif future_type == FutureType.STOP_REQUEST:
-                    raise NotImplemented("Stopping has not yet been implemented.")
                 elif future_type == FutureType.WORKER_RESPONSE:
                     try:
                         worker_response: inference.WorkerResponse = result
+                        message_id = work_request_map[worker_response.request_id]
+                        stop_queue = queueing.stop_queue(deps.redis_client, message_id)
+                        was_stopped = await stop_queue.dequeue_immediate()
+
+                        if was_stopped is not None:
+                            await forward_stop_request_to_worker(websocket, message_id)
+                            # TODO: finish processing early?
+
                         match worker_response.response_type:
                             case "pong":
                                 worker_response = cast(inference.PongResponse, worker_response)
@@ -275,9 +282,13 @@ async def handle_worker(
     finally:
         logger.info(f"Worker {worker_id} disconnected")
         try:
-            await redis_client.close()
+            await blocking_work_queue.redis_client.close()
         except Exception:
-            logger.warning("Error while closing redis client")
+            logger.warning("Error while closing redis client of blocking work queue in handle_worker()")
+        try:
+            await blocking_stop_queue.redis_client.close()
+        except Exception:
+            logger.warning("Error while closing redis client of blocking stop queue in handle_worker()")
         try:
             await worker_utils.delete_worker_session(worker_session.id)
         except Exception:
@@ -352,6 +363,17 @@ async def initiate_work_for_message(
         raise
 
     return work_request
+
+async def forward_stop_request_to_worker(
+    websocket: fastapi.WebSocket,
+    message_id: str
+) -> inference.StopRequest:
+    
+    # TODO update database here?
+
+    stop_request = inference.StopRequest(message_id)
+    await worker_utils.send_worker_request(websocket, stop_request)
+
 
 
 async def handle_token_response(

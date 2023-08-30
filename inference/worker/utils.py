@@ -267,6 +267,7 @@ class HttpClient(pydantic.BaseModel):
 
 def get_inference_server_stream_events(
     request: interface.GenerateStreamRequest,
+    stop_event: threading.Event
 ) -> Iterable[interface.GenerateStreamResponse]:
     """Query the model inference server specified in the worker settings and stream the generation events."""
     http = HttpClient(
@@ -298,3 +299,8 @@ def get_inference_server_stream_events(
             continue
         stream_response = interface.GenerateStreamResponse.parse_raw(event.data)
         yield stream_response
+
+        if stop_event.is_set():
+            client.resp.close()
+            # TODO what event do we want to yield here?
+            break

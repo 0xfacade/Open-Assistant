@@ -6,6 +6,7 @@ This is an alternative to running the HuggingFace `text-generation-inference` (t
 import sys
 import threading
 from queue import Queue
+import asyncio
 
 import fastapi
 import hf_stopping
@@ -60,7 +61,7 @@ def model_thread():
     output_queue: Queue
     eos_token_id = tokenizer.eos_token_id if hasattr(tokenizer, "eos_token_id") else None
     while True:
-        request, output_queue = model_input_queue.get()
+        request, output_queue, stop_event = model_input_queue.get()
         try:
             prompt = request.inputs
             params = request.parameters.dict()
@@ -90,10 +91,13 @@ def model_thread():
                 ids = ids.to(model.device)
                 stopping_criteria = (
                     transformers.StoppingCriteriaList(
-                        [hf_stopping.SequenceStoppingCriteria(tokenizer, stop_sequences, prompt)]
+                        [
+                            hf_stopping.SequenceStoppingCriteria(tokenizer, stop_sequences, prompt),
+                            hf_stopping.StopEventStoppingCriteria(stop_event)
+                        ] if stop_sequences else [
+                            hf_stopping.StopEventStoppingCriteria(stop_event)
+                        ]
                     )
-                    if stop_sequences
-                    else None
                 )
                 output = model.generate(
                     ids,
@@ -196,7 +200,8 @@ async def generate(
     def event_stream():
         try:
             output_queue: Queue = Queue()
-            model_input_queue.put_nowait((request, output_queue))
+            stop_event = threading.Event()
+            model_input_queue.put_nowait((request, output_queue, stop_event))
             while True:
                 output = output_queue.get()  # type: interface.GenerateStreamResponse
                 yield {"data": output.json()}
@@ -204,6 +209,9 @@ async def generate(
                     break
                 if output.is_error:
                     raise Exception(output.error)
+        except asyncio.CancelledError:
+            stop_event.set()
+            # TODO: do more stuff?
         except Exception as e:
             logger.exception("Exception in event stream")
             output_queue.put_nowait(interface.GenerateStreamResponse(error=str(e)))

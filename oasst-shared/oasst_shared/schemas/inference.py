@@ -300,6 +300,10 @@ class WorkRequest(WorkerRequestBase):
         default_factory=SafetyParameters,
     )
 
+class StopRequest(WorkerRequestBase):
+    request_type: Literal["stop"] = "stop"
+    message_id: str  # TODO: make sure this is the piece of info we need
+
 
 class PingRequest(WorkerRequestBase):
     request_type: Literal["ping"] = "ping"

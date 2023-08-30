@@ -1,6 +1,7 @@
 import torch
 from tokenizers import Tokenizer
 from transformers import StoppingCriteria
+import threading
 
 
 class SequenceStoppingCriteria(StoppingCriteria):
@@ -31,3 +32,17 @@ class SequenceStoppingCriteria(StoppingCriteria):
         # but can't encode stop sequences as they don't always tokenize the same
         generated_text = self.tokenizer.decode(generated_ids)
         return any(text in generated_text for text in self.stop_texts)
+    
+
+
+class StopEventStoppingCriteria(StoppingCriteria):
+
+    stop_event: threading.Event
+
+    def __init__(self, stop_event: threading.Event, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.stop_event = stop_event
+
+
+    def __call__(self, *args, **kwargs):
+        return self.stop_event.is_set()

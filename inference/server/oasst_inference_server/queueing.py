@@ -42,6 +42,9 @@ class RedisQueue:
         if val is not None and self.with_counter:
             await self.redis_client.incr(f"ctr_deq:{self.queue_id}")
         return val
+    
+    async def dequeue_immediate(self) -> str | None:
+        return await self.redis_client.lpop(self.queue_id)
 
     async def set_expire(self, timeout: int) -> None:
         return await self.redis_client.expire(self.queue_id, timeout)
@@ -86,6 +89,9 @@ def work_queue(redis_client: redis.Redis, worker_compat_hash: str) -> RedisQueue
         counter_pos_expire=settings.message_queue_expire,
         max_size=settings.work_queue_max_size,
     )
+
+def stop_queue(redis_client: redis.Redis, message_id: str) -> RedisQueue:
+    return RedisQueue(redis_client, f"stop:{message_id}", expire=settings.message_queue_expire)
 
 
 def compliance_queue(redis_client: redis.Redis, worker_id: str) -> RedisQueue:

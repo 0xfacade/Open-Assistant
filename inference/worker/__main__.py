@@ -13,6 +13,7 @@ from loguru import logger
 from oasst_shared import model_configs
 from oasst_shared.schemas import inference
 from settings import settings
+import threading
 
 
 def terminate_worker(signum, frame):
@@ -75,6 +76,8 @@ def main():
                 utils.send_response(ws, worker_info)
                 logger.warning("Config sent, waiting for work...")
 
+                message_id_to_stop_event: dict[str, threading.Event] = dict()
+
                 with concurrent.futures.ThreadPoolExecutor(max_workers=worker_config.max_parallel_requests) as executor:
                     ftrs = []
                     while True:
@@ -91,10 +94,17 @@ def main():
                         match worker_request.request_type:
                             case "work":
                                 logger.info(f"Handling work request: {worker_request.id=}")
+                                stop_event = threading.Event()
+                                message_id = worker_request.thread.messages[-1]
+                                message_id_to_stop_event[message_id] = stop_event
                                 ftr = executor.submit(
-                                    work.handle_work_request, ws, tokenizer, worker_request, worker_config
+                                    work.handle_work_request, ws, tokenizer, worker_request, worker_config, stop_event
                                 )
                                 ftrs.append(ftr)
+                            case "stop":
+                                # approach 1: call close() on stream_events in handle_work_request
+                                # approach 2: pass a switchable flag to handle_work_request, trigger here
+                                pass
                             case "ping":
                                 utils.send_response(
                                     ws,
