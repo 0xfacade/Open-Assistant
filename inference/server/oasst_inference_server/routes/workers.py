@@ -1,6 +1,7 @@
 import asyncio
 import datetime
-from typing import cast
+from typing import cast, TypeVar, Awaitable
+from enum import Enum
 
 import fastapi
 import pydantic
@@ -85,6 +86,23 @@ def get_work_request_container(work_request_map: WorkRequestContainerMap, reques
     return container
 
 
+class FutureType(str, Enum):
+    WORK_REQUEST = "WORK_REQUEST"
+    STOP_REQUEST = "STOP_REQUEST"
+    WORKER_RESPONSE = "WORKER_RESPONSE"
+
+
+AwaitResult = TypeVar("AwaitResult")
+
+def make_typed_future(future_type: FutureType, awaitable: Awaitable[AwaitResult]) -> asyncio.Future:
+    "Wrap an awaitable returning X such that it returns `future_type, X` instead."
+    async def wrapper():
+        result = await awaitable
+        return future_type, result
+    
+    return asyncio.ensure_future(wrapper())
+
+
 @router.websocket("/work")
 async def handle_worker(
     websocket: fastapi.WebSocket,
@@ -134,15 +152,17 @@ async def handle_worker(
                 worker_session.metrics = metrics
             await worker_utils.store_worker_session(worker_session)
 
-        def _add_dequeue(ftrs: set):
+        def _add_work_dequeue(ftrs: set):
+            "Make sure we are listening for work requests on the reddis work queue."
             requests_in_progress = len(work_request_map)
             if requests_in_progress < worker_config.max_parallel_requests:
-                ftrs.add(asyncio.ensure_future(blocking_work_queue.dequeue(timeout=0)))
+                ftrs.add(make_typed_future(FutureType.WORK_REQUEST, blocking_work_queue.dequeue(timeout=0)))
 
         def _add_receive(ftrs: set):
-            ftrs.add(asyncio.ensure_future(worker_utils.receive_worker_response(websocket=websocket)))
+            "Make sure we are listening for responses from the worker on the websocket."
+            ftrs.add(make_typed_future(FutureType.WORKER_RESPONSE, worker_utils.receive_worker_response(websocket=websocket)))
 
-        _add_dequeue(pending_futures)
+        _add_work_dequeue(pending_futures)
         _add_receive(pending_futures)
 
         logger.info(f"handle_worker: {worker_id=} started")
@@ -154,11 +174,8 @@ async def handle_worker(
             )
             ftr: asyncio.Future
             for ftr in done:
-                result = ftr.result()
-                if result is None:
-                    logger.error(f"handle_worker: {worker_id=} received None from queue. This should never happen.")
-                    raise RuntimeError("Received None from queue. This should never happen.")
-                elif isinstance(result, tuple):
+                future_type, result = ftr.result()
+                if future_type == FutureType.WORK_REQUEST:
                     try:
                         _, message_id = result
                         work_request = await initiate_work_for_message(
@@ -177,8 +194,10 @@ async def handle_worker(
                         logger.warning(f"Message timed out before work could be initiated: {e.message.id=}")
                         await handle_timeout(message=e.message)
                     finally:
-                        _add_dequeue(pending_futures)
-                else:
+                        _add_work_dequeue(pending_futures)
+                elif future_type == FutureType.STOP_REQUEST:
+                    raise NotImplemented("Stopping has not yet been implemented.")
+                elif future_type == FutureType.WORKER_RESPONSE:
                     try:
                         worker_response: inference.WorkerResponse = result
                         match worker_response.response_type:
@@ -228,8 +247,12 @@ async def handle_worker(
                                 raise RuntimeError(f"Unknown response type: {worker_response.response_type}")
                     finally:
                         if len(pending_futures) == 0:
-                            _add_dequeue(pending_futures)
+                            _add_work_dequeue(pending_futures)
                         _add_receive(pending_futures)
+                else:
+                    logger.error(f"handle_worker: {worker_id=} encountered unknown future type {future_type}")
+                    raise RuntimeError(f"Unknown future type: {future_type}")
+                
             if not done:
                 await worker_utils.send_worker_request(websocket, inference.PingRequest())
 
