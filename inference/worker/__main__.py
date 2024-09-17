@@ -3,6 +3,7 @@ import signal
 import sys
 import time
 from contextlib import closing
+import threading
 
 import pydantic
 import transformers
@@ -95,6 +96,9 @@ def main():
                                     work.handle_work_request, ws, tokenizer, worker_request, worker_config
                                 )
                                 ftrs.append(ftr)
+                            case "stop_generating":
+                                stop_event = work.get_stop_requested_event(worker_request.message_id)
+                                stop_event.set()
                             case "ping":
                                 utils.send_response(
                                     ws,

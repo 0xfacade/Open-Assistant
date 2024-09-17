@@ -299,6 +299,10 @@ class WorkRequest(WorkerRequestBase):
     )
 
 
+class StopGeneratingRequest(WorkerRequestBase):
+    message_id: str
+
+
 class PingRequest(WorkerRequestBase):
     request_type: Literal["ping"] = "ping"
 
@@ -386,6 +390,7 @@ class GeneralErrorResponse(WorkerResponseBase):
 
 _WorkerRequest = Union[
     WorkRequest,
+    StopGeneratingRequest,
     PingRequest,
     ErrorRequest,
     TerminateRequest,

@@ -75,6 +75,10 @@ def message_queue(redis_client: redis.Redis, message_id: str) -> RedisQueue:
     return RedisQueue(redis_client, f"message:{message_id}", expire=settings.message_queue_expire)
 
 
+def stop_generating_queue(redis_client: redis.Redis, message_id: str) -> RedisQueue:
+    return RedisQueue(redis_client, f"stop_generating:{message_id}", expire=settings.message_queue_expire)
+
+
 def work_queue(redis_client: redis.Redis, worker_compat_hash: str) -> RedisQueue:
     if settings.allowed_worker_compat_hashes != "*":
         if worker_compat_hash not in settings.allowed_worker_compat_hashes_list:

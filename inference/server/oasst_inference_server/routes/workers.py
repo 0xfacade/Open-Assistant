@@ -152,6 +152,7 @@ async def handle_worker(
             (done, pending_futures) = await asyncio.wait(
                 pending_futures, timeout=settings.worker_ping_interval, return_when=asyncio.FIRST_COMPLETED
             )
+            # TODO: Maybe remove pending futures for stop dequeueing by age?
             ftr: asyncio.Future
             for ftr in done:
                 result = ftr.result()
@@ -159,6 +160,10 @@ async def handle_worker(
                     logger.error(f"handle_worker: {worker_id=} received None from queue. This should never happen.")
                     raise RuntimeError("Received None from queue. This should never happen.")
                 elif isinstance(result, tuple):
+                    # We've dequeued something from Redis (either a work or a stop request)
+                    # TODO: enqueue sth like stop:{message_id}
+                    # TODO: if dequeued message starts with stop, send a stop request over the websocket
+
                     try:
                         _, message_id = result
                         work_request = await initiate_work_for_message(
@@ -168,6 +173,11 @@ async def handle_worker(
                             worker_id=worker_id,
                             worker_config=worker_config,
                         )
+                        stopping_queue = queueing.stop_generating_queue(redis_client, message_id)
+                        # TODO: needs to be cleaned up when future is not needed anymore
+                        # TODO: react to this future (send stop command over websocket)
+                        pending_futures.add(asyncio.ensure_future(stopping_queue.dequeue(timeout=0)))
+
                         work_request_map[work_request.id] = WorkRequestContainer(
                             work_request=work_request, message_id=message_id
                         )
@@ -187,6 +197,7 @@ async def handle_worker(
                                 await _update_session(worker_response.metrics)
                             case "token":
                                 worker_response = cast(inference.TokenResponse, worker_response)
+                                # Accept the token, put it on the message queue
                                 await handle_token_response(
                                     work_request_map=work_request_map,
                                     response=worker_response,
@@ -197,6 +208,7 @@ async def handle_worker(
                                     work_request_map=work_request_map,
                                     response=worker_response,
                                 )
+                                # TODO: remove the future for the stop queue from the set of pending futures
                                 await _update_session(worker_response.metrics)
                             case "error":
                                 worker_response = cast(inference.ErrorResponse, worker_response)
